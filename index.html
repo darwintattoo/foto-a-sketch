@@ -92,12 +92,14 @@
             reader.onload = function(event) {
                 originalImage = new Image();
                 originalImage.onload = function() {
+                    console.log("Imagen cargada, dimensiones:", originalImage.width, "x", originalImage.height);
                     const resizedImage = resizeImage(originalImage, 1000);
                     Object.values(canvases).forEach(canvas => {
                         canvas.width = resizedImage.width;
                         canvas.height = resizedImage.height;
                     });
                     ctxs.original.drawImage(resizedImage, 0, 0);
+                    console.log("Imagen dibujada en el canvas original");
                     updateEffect();
                 }
                 originalImage.src = event.target.result;
@@ -125,11 +127,14 @@
             canvas.width = width;
             canvas.height = height;
             canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            console.log("Imagen redimensionada a", width, "x", height);
             return canvas;
         }
 
         function updateEffect() {
             if (!originalImage) return;
+
+            console.log("Actualizando efecto");
 
             const edgeIntensity = parseInt(edgeIntensitySlider.value) / 100;
             const contrast = parseInt(contrastSlider.value) / 100;
@@ -144,6 +149,8 @@
             // Aplicar efecto de sketch
             const sketchData = createSketchEffect(imageData, edgeIntensity, contrast, brightness);
             ctxs.sketch.putImageData(sketchData, 0, 0);
+
+            console.log("Efecto de sketch aplicado");
         }
 
         function createSketchEffect(imageData, edgeIntensity, contrast, brightness) {
@@ -174,4 +181,18 @@
         function calculateGradient(data, width, x, y, kernel) {
             let sum = 0;
             for (let ky = -1; ky <= 1; ky++) {
-                for (let kx = -1; kx <= 1; kx
+                for (let kx = -1; kx <= 1; kx++) {
+                    const idx = ((y + ky) * width + (x + kx)) * 4;
+                    sum += data[idx] * kernel[(ky + 1) * 3 + (kx + 1)];
+                }
+            }
+            return sum;
+        }
+
+        function applyContrastAndBrightness(data, contrast, brightness) {
+            const factor = (259 * (contrast + 1)) / (255 * (1 - contrast));
+            for (let i = 0; i < data.length; i += 4) {
+                for (let j = 0; j < 3; j++) {
+                    let value = data[i + j];
+                    value = factor * (value - 128) + 128; // Contraste
+                    value += brightness; // Brillo
