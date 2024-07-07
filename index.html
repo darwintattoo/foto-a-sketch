@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const OptimizedStencilCreator = () => {
+const ImprovedStencilCreator = () => {
   const [image, setImage] = useState(null);
-  const [threshold, setThreshold] = useState(128);
-  const [edgeDetection, setEdgeDetection] = useState(20);
-  const [inverted, setInverted] = useState(false);
   const [lineThickness, setLineThickness] = useState(1);
+  const [edgeStrength, setEdgeStrength] = useState(50);
+  const [detail, setDetail] = useState(50);
   const originalCanvasRef = useRef(null);
   const processedCanvasRef = useRef(null);
 
@@ -14,11 +13,11 @@ const OptimizedStencilCreator = () => {
       const img = new Image();
       img.onload = () => {
         drawOriginalImage(img);
-        createStencil(img);
+        processStencilImage(img);
       };
       img.src = URL.createObjectURL(image);
     }
-  }, [image, threshold, edgeDetection, inverted, lineThickness]);
+  }, [image, lineThickness, edgeStrength, detail]);
 
   const drawOriginalImage = (img) => {
     const canvas = originalCanvasRef.current;
@@ -28,7 +27,7 @@ const OptimizedStencilCreator = () => {
     ctx.drawImage(img, 0, 0);
   };
 
-  const createStencil = (img) => {
+  const processStencilImage = (img) => {
     const canvas = processedCanvasRef.current;
     const ctx = canvas.getContext('2d');
     canvas.width = img.width;
@@ -41,20 +40,31 @@ const OptimizedStencilCreator = () => {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
 
-    // Aplica detección de bordes y umbral
-    const edgeData = detectEdges(imageData);
+    // Convierte a escala de grises y aplica contraste
+    for (let i = 0; i < data.length; i += 4) {
+      const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      const adjustedAvg = adjustContrast(avg, 50);
+      data[i] = data[i + 1] = data[i + 2] = adjustedAvg;
+    }
 
-    // Dibuja el stencil
+    // Aplica detección de bordes mejorada
+    const edgeData = improvedEdgeDetection(imageData, edgeStrength, detail);
+
+    // Limpia el canvas para el resultado final
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = inverted ? 'black' : 'white';
+    ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = inverted ? 'white' : 'black';
-    ctx.lineWidth = lineThickness;
 
-    for (let y = 0; y < canvas.height; y++) {
-      for (let x = 0; x < canvas.width; x++) {
+    // Dibuja las líneas del stencil
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = lineThickness;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (let y = 1; y < canvas.height - 1; y++) {
+      for (let x = 1; x < canvas.width - 1; x++) {
         const idx = (y * canvas.width + x) * 4;
-        if (edgeData[idx] > threshold) {
+        if (edgeData[idx] > 0) {
           ctx.beginPath();
           ctx.moveTo(x, y);
           ctx.lineTo(x + 1, y);
@@ -62,17 +72,26 @@ const OptimizedStencilCreator = () => {
         }
       }
     }
+
+    // Aplica suavizado a las líneas
+    smoothLines(ctx, canvas.width, canvas.height);
   };
 
-  const detectEdges = (imageData) => {
+  const adjustContrast = (value, contrast) => {
+    return Math.min(255, Math.max(0, (value - 128) * (1 + contrast / 100) + 128));
+  };
+
+  const improvedEdgeDetection = (imageData, strength, detail) => {
     const { width, height, data } = imageData;
     const output = new Uint8ClampedArray(data.length);
-    
+    const threshold = 255 - (strength * 2.55);
+    const detailFactor = detail / 50;
+
     for (let y = 1; y < height - 1; y++) {
       for (let x = 1; x < width - 1; x++) {
         const idx = (y * width + x) * 4;
         
-        // Operador Sobel simplificado
+        // Operador Sobel mejorado
         const gx = 
           -data[idx - 4 - width * 4] + data[idx + 4 - width * 4] +
           -2 * data[idx - 4] + 2 * data[idx + 4] +
@@ -81,13 +100,36 @@ const OptimizedStencilCreator = () => {
           -data[idx - width * 4 - 4] - 2 * data[idx - width * 4] - data[idx - width * 4 + 4] +
           data[idx + width * 4 - 4] + 2 * data[idx + width * 4] + data[idx + width * 4 + 4];
 
-        const edge = Math.sqrt(gx * gx + gy * gy);
-        output[idx] = output[idx + 1] = output[idx + 2] = edge * (edgeDetection / 10);
+        const edge = Math.sqrt(gx * gx + gy * gy) * detailFactor;
+        output[idx] = output[idx + 1] = output[idx + 2] = edge > threshold ? 255 : 0;
         output[idx + 3] = 255;
       }
     }
 
     return output;
+  };
+
+  const smoothLines = (ctx, width, height) => {
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = (y * width + x) * 4;
+        const neighbors = [
+          data[idx - 4], data[idx + 4],
+          data[idx - width * 4], data[idx + width * 4],
+          data[idx - 4 - width * 4], data[idx + 4 - width * 4],
+          data[idx - 4 + width * 4], data[idx + 4 + width * 4]
+        ];
+        const blackNeighbors = neighbors.filter(n => n === 0).length;
+        if (blackNeighbors >= 5) {
+          data[idx] = data[idx + 1] = data[idx + 2] = 0;
+        }
+      }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
   };
 
   const handleFileUpload = (e) => {
@@ -99,14 +141,14 @@ const OptimizedStencilCreator = () => {
   const downloadStencil = () => {
     const canvas = processedCanvasRef.current;
     const link = document.createElement('a');
-    link.download = 'optimized_stencil.png';
+    link.download = 'improved_stencil.png';
     link.href = canvas.toDataURL();
     link.click();
   };
 
   return (
     <div className="flex flex-col items-center p-4 bg-gray-100 min-h-screen">
-      <h1 className="text-3xl font-bold mb-6">Creador de Stencils Optimizado</h1>
+      <h1 className="text-3xl font-bold mb-6">Creador de Stencils Mejorado</h1>
       
       <div className="w-full max-w-4xl bg-white p-6 rounded-lg shadow-md">
         <input 
@@ -118,30 +160,6 @@ const OptimizedStencilCreator = () => {
 
         {image && (
           <>
-            <div className="mb-4">
-              <label className="block mb-2">Umbral: {threshold}</label>
-              <input 
-                type="range" 
-                min="0" 
-                max="255" 
-                value={threshold} 
-                onChange={(e) => setThreshold(Number(e.target.value))} 
-                className="w-full"
-              />
-            </div>
-
-            <div className="mb-4">
-              <label className="block mb-2">Detección de Bordes: {edgeDetection}</label>
-              <input 
-                type="range" 
-                min="1" 
-                max="50" 
-                value={edgeDetection} 
-                onChange={(e) => setEdgeDetection(Number(e.target.value))} 
-                className="w-full"
-              />
-            </div>
-
             <div className="mb-4">
               <label className="block mb-2">Grosor de Línea: {lineThickness}</label>
               <input 
@@ -156,15 +174,27 @@ const OptimizedStencilCreator = () => {
             </div>
 
             <div className="mb-4">
-              <label className="flex items-center">
-                <input 
-                  type="checkbox" 
-                  checked={inverted} 
-                  onChange={(e) => setInverted(e.target.checked)}
-                  className="mr-2"
-                />
-                Invertir Colores
-              </label>
+              <label className="block mb-2">Fuerza de Bordes: {edgeStrength}</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                value={edgeStrength} 
+                onChange={(e) => setEdgeStrength(Number(e.target.value))} 
+                className="w-full"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block mb-2">Nivel de Detalle: {detail}</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                value={detail} 
+                onChange={(e) => setDetail(Number(e.target.value))} 
+                className="w-full"
+              />
             </div>
 
             <div className="flex flex-col md:flex-row">
@@ -191,4 +221,4 @@ const OptimizedStencilCreator = () => {
   );
 };
 
-export default OptimizedStencilCreator;
+export default ImprovedStencilCreator;
